@@ -20,6 +20,21 @@ test('staff login, database orders, delivery action, and logout respond to user 
     contentType: 'application/json',
     body: JSON.stringify({ orders: [{ id: 1, order: 'ORD-1001', patient: 'Ananya Rao', status: 'ready', last_delivery: null }] }),
   }));
+  await page.route('**/api/staff/summaries/review', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ summaries: [] }),
+  }));
+  await page.route('**/api/staff/outbox', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ messages: [] }),
+  }));
+  await page.route('**/api/staff/callback-tasks', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ tasks: [] }),
+  }));
   await page.route('**/api/staff/orders/1/resend', (route) => route.fulfill({
     status: 202,
     contentType: 'application/json',
@@ -31,8 +46,8 @@ test('staff login, database orders, delivery action, and logout respond to user 
   });
 
   await page.goto('/staff/login');
-  await page.getByLabel('Work email').fill('staff@example.com');
-  await page.getByLabel('Password').fill('password123');
+  await page.getByLabel('Work email', { exact: true }).fill('staff@example.com');
+  await page.getByLabel('Password', { exact: true }).fill('password123');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page.getByRole('heading', { name: 'Report orders' })).toBeVisible();

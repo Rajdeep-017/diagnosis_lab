@@ -35,6 +35,21 @@ for (const theme of themes) {
           contentType: 'application/json',
           body: JSON.stringify({ orders: [{ id: 1, order: 'ORD-1001', patient: 'Ananya Rao', status: 'ready', last_delivery: null }] }),
         }));
+        await page.route('**/api/staff/summaries/review', (route) => route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ summaries: [] }),
+        }));
+        await page.route('**/api/staff/outbox', (route) => route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ messages: [] }),
+        }));
+        await page.route('**/api/staff/callback-tasks', (route) => route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ tasks: [] }),
+        }));
         await page.route('**/api/patient/me', (route) => route.fulfill({
           status: 200,
           contentType: 'application/json',

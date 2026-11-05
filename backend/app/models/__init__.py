@@ -1,0 +1,31 @@
+from app.models.domain import (
+    Account,
+    AccountPatient,
+    AccessLog,
+    CallbackTask,
+    Notification,
+    Order,
+    OtpChallenge,
+    Patient,
+    ReportLink,
+    Result,
+    StaffUser,
+    Summary,
+    SummaryProblemFlag,
+)
+
+__all__ = [
+    'Account',
+    'AccountPatient',
+    'AccessLog',
+    'CallbackTask',
+    'Notification',
+    'Order',
+    'OtpChallenge',
+    'Patient',
+    'ReportLink',
+    'Result',
+    'StaffUser',
+    'Summary',
+    'SummaryProblemFlag',
+]

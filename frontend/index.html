@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" />
+    <script>
+      (() => {
+        try {
+          const themes = ['clarity', 'large', 'night', 'console'];
+          const saved = localStorage.getItem('lab-theme');
+          const theme = themes.includes(saved) ? saved : (matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'clarity');
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.dataset.motion = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduce' : 'full';
+          const language = localStorage.getItem('lab-language');
+          document.documentElement.lang = language === 'te' ? 'te-IN' : language === 'hi' ? 'hi-IN' : 'en-IN';
+          const font = language === 'te' ? 'noto-sans-telugu' : language === 'hi' ? 'noto-sans-devanagari' : 'noto-sans-latin';
+          const preload = document.createElement('link');
+          preload.rel = 'preload';
+          preload.as = 'font';
+          preload.type = 'font/woff2';
+          preload.crossOrigin = 'anonymous';
+          preload.dataset.languageFont = 'true';
+          preload.href = `/fonts/${font}.woff2`;
+          document.head.appendChild(preload);
+        } catch {
+          document.documentElement.dataset.theme = 'clarity';
+        }
+      })();
+    </script>
+    <title>Company A Reports</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

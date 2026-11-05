@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.lighthouseci/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS/editor
+.DS_Store
+.vscode/

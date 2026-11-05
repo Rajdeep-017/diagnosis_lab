@@ -1,0 +1,37 @@
+{
+  "ci": {
+    "collect": {
+      "url": ["http://127.0.0.1:4173/", "http://127.0.0.1:4173/report"],
+      "startServerCommand": "npm run preview -- --host 127.0.0.1 --port 4173",
+      "startServerReadyPattern": "Local:",
+      "startServerReadyTimeout": 30000,
+      "numberOfRuns": 3,
+      "settings": {
+        "formFactor": "mobile",
+        "screenEmulation": {
+          "mobile": true,
+          "width": 360,
+          "height": 640,
+          "deviceScaleFactor": 1
+        },
+        "throttlingMethod": "simulate",
+        "throttling": {
+          "cpuSlowdownMultiplier": 4,
+          "rttMs": 150,
+          "throughputKbps": 1600
+        }
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["warn", { "minScore": 0.85 }],
+        "largest-contentful-paint": ["error", { "maxNumericValue": 2500 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.05 }]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": "./.lighthouseci"
+    }
+  }
+}

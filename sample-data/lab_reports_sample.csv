@@ -1,6 +1,10 @@
-order_no,patient_name,patient_mobile,parameter,value,unit,reference_range,status
-ORD-1001,Ananya Rao,9876543210,Haemoglobin,10.2,g/dL,12.0-15.5,ready
-ORD-1002,Vivek Nair,9876543211,LDL,142,mg/dL,0-100,ready
-ORD-1003,Ramesh Yadav,9876543212,Potassium,6.8,mEq/L,3.5-5.1,ready
-ORD-1004,Sowmya Kumar,9876543213,Glucose,88,mg/dL,70-140,ready
-ORD-1005,Meera Singh,9876543214,Creatinine,1.1,mg/dL,0.6-1.2,ready
+order_no,patient_name,mobile,parameter,value,unit,reference_range,flag,status
+DEMO-1001,Demo Family Member A,9000001001,Haemoglobin,10.2,g/dL,12.0-15.5,low,processing
+DEMO-1002,Demo Family Member B,9000001001,Glucose,92,mg/dL,70-140,normal,ready
+DEMO-1003,Demo Family Member C,9000001001,Creatinine,1.4,mg/dL,0.6-1.2,high,ready
+DEMO-1004,Demo Patient D,9000001002,LDL,142,mg/dL,0-100,high,ready
+DEMO-1005,Demo Patient E,9000001003,Glucose,88,mg/dL,70-140,normal,ready
+DEMO-1006,Demo Patient F,9000001004,Vitamin D,12,ng/mL,30-100,low,ready
+DEMO-1007,Demo Patient G,9000001005,Cholesterol,188,mg/dL,0-200,normal,ready
+DEMO-1008,Demo Patient H,9000001006,TSH,3.1,mIU/L,0.4-4.0,normal,ready
+DEMO-1009,Demo Patient I,9000001007,Potassium,7.1,mEq/L,3.5-5.1,critical,ready

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -13,9 +16,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - run: python -m pip install --upgrade pip
-      - run: pip install -r backend/requirements.txt
+      - run: pip install -r backend/requirements.txt ruff mypy pip-audit
+      - run: ruff check backend/app/config.py backend/app/db.py backend/app/main.py backend/app/logging_config.py
+      - run: mypy --ignore-missing-imports --follow-imports=silent --check-untyped-defs backend/app/config.py backend/app/db.py backend/app/main.py backend/app/logging_config.py
       - run: cd backend && pytest -q
+      - run: pip-audit -r backend/requirements.txt
 
   frontend:
     runs-on: ubuntu-latest
@@ -24,9 +32,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - run: cd frontend && npm ci
+      - run: cd frontend && npm audit --audit-level=high
       - run: cd frontend && npm test
       - run: cd frontend && npx playwright install --with-deps chromium
       - run: cd frontend && npm run test:e2e
       - run: cd frontend && npm run test:real-backend
       - run: cd frontend && npm run build
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,60 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the production PostgreSQL URL}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?Set FRONTEND_ORIGIN to the HTTPS site origin}
+      ENVIRONMENT: production
+      JWT_SECRET: ${JWT_SECRET:?Set a randomly generated JWT_SECRET of at least 32 characters}
+      DEMO_MODE: 'false'
+      AUTH_COOKIE_SECURE: 'true'
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-15000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    expose:
+      - '8000'
+    restart: unless-stopped
+    stop_grace_period: 35s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ['CMD', 'python', '-c', "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      target: runtime
+    ports:
+      - '${FRONTEND_PORT:-8080}:8080'
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  migrate:
+    build:
+      context: ./backend
+      target: runtime
+    profiles: [release]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the production PostgreSQL URL}
+      ENVIRONMENT: production
+      JWT_SECRET: ${JWT_SECRET:?Set a randomly generated JWT_SECRET of at least 32 characters}
+      DEMO_MODE: 'false'
+      AUTH_COOKIE_SECURE: 'true'
+    command: ['python', '-m', 'alembic', 'upgrade', 'head']
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

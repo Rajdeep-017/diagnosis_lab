@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, HTTPException, Response, status
@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.core.clock import utc_now
 from app.core.patient_auth import PATIENT_COOKIE_NAME, create_patient_session_token
 from app.core.patient_auth import Database
-from app.models.domain import Account, AccountPatient, OtpChallenge, Order, Patient, ReportLink
+from app.models.domain import Account, AccountPatient, Notification, NotificationStatus, OtpChallenge, Order, Patient, ReportLink
 from app.services.notifications import DemoNotificationProvider
 
 router = APIRouter()
@@ -127,8 +127,16 @@ def request_otp(payload: OtpRequest, db: Database) -> dict[str, object]:
     )
     db.add(challenge)
     db.flush()
-    _demo_provider.send(mobile, f'Demo OTP: {code} (valid for {settings.otp_ttl_minutes} minutes)')
+    message = f'Demo OTP: {code} (valid for {settings.otp_ttl_minutes} minutes)'
+    _demo_provider.send(mobile, message)
     _demo_outbox.append({'challenge_id': challenge_id, 'mobile': mobile, 'code': code})
+    db.add(Notification(
+        channel='sms',
+        recipient=_mask_mobile(mobile),
+        purpose='otp',
+        payload=message if settings.demo_mode else 'Verification code requested.',
+        status=NotificationStatus.sent,
+    ))
     db.commit()
     return {
         'challenge_id': challenge_id,

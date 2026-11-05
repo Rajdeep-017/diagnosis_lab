@@ -11,7 +11,7 @@ describe('apiRequest', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ user: { email: 'staff@example.com' } }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
@@ -40,7 +40,7 @@ describe('apiRequest', () => {
         method: 'POST',
         body: JSON.stringify({ reason: 'Unclear' }),
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
       });
     });
 

@@ -18,6 +18,7 @@ from app.models.domain import (
     Account,
     AccountPatient,
     FlagStatus,
+    Notification,
     Order,
     OtpChallenge,
     Patient,
@@ -45,8 +46,8 @@ def patient_client() -> Generator[tuple[TestClient, sessionmaker[Session], str, 
     app.dependency_overrides[get_db] = override_get_db
     now = datetime.now(timezone.utc)
     with test_session() as db:
-        patient_a = Patient(name='Ananya Rao', mobile='9876543210')
-        patient_b = Patient(name='Vivek Nair', mobile='9876543211')
+        patient_a = Patient(name='Demo Person One', mobile='9876543210')
+        patient_b = Patient(name='Demo Person Two', mobile='9876543211')
         order_a = Order(order_no='ORD-1001', patient=patient_a, status='ready', signed_off_at=now)
         order_b = Order(order_no='ORD-1002', patient=patient_b, status='ready', signed_off_at=now)
         low_result = Result(
@@ -120,11 +121,16 @@ def _login(client: TestClient, mobile: str = '9876543210') -> str:
 
 
 def test_patient_otp_session_cookie_me_and_family_lists(patient_client: Any) -> None:
-    client, _, _, _ = patient_client
+    client, test_session, _, _ = patient_client
     requested = client.post('/api/auth/otp/request', json={'mobile': '9876543210', 'consent': True})
     assert requested.status_code == 202
     challenge_id = requested.json()['challenge_id']
     assert client.get(f'/api/auth/demo/outbox/{challenge_id}').json()['code'] == '123456'
+    with test_session() as db:
+        notification = db.scalar(select(Notification).where(Notification.purpose == 'otp'))
+        assert notification is not None
+        assert notification.recipient == '+91******10'
+        assert notification.payload == 'Demo OTP: 123456 (valid for 5 minutes)'
 
     wrong = client.post('/api/auth/otp/verify', json={'challenge_id': challenge_id, 'code': '000000'})
     assert wrong.status_code == 401
@@ -133,16 +139,30 @@ def test_patient_otp_session_cookie_me_and_family_lists(patient_client: Any) -> 
     assert verified.status_code == 200
     assert 'lab_patient_session' in verified.headers['set-cookie']
     assert 'httponly' in verified.headers['set-cookie'].lower()
-    assert client.get('/api/patient/me').json()['patients'] == [{'id': 1, 'name': 'Ananya Rao'}]
+    assert client.get('/api/patient/me').json()['patients'] == [{'id': 1, 'name': 'Demo Person One'}]
     patients = client.get('/api/patient/patients')
     assert patients.status_code == 200
-    assert [patient['name'] for patient in patients.json()['patients']] == ['Ananya Rao']
+    assert [patient['name'] for patient in patients.json()['patients']] == ['Demo Person One']
     orders = client.get('/api/patient/patients/1/orders')
     assert orders.status_code == 200
     assert orders.json()['orders'][0]['order_no'] == 'ORD-1001'
     assert orders.json()['orders'][0]['signed_at']
     assert client.post('/api/patient/logout').status_code == 204
     assert client.get('/api/patient/me').status_code == 401
+
+
+def test_otp_challenge_is_locked_after_five_incorrect_codes(patient_client: Any) -> None:
+    client, _, _, _ = patient_client
+    requested = client.post('/api/auth/otp/request', json={'mobile': '9876543210', 'consent': True})
+    challenge_id = requested.json()['challenge_id']
+
+    responses = [
+        client.post('/api/auth/otp/verify', json={'challenge_id': challenge_id, 'code': '000000'})
+        for _ in range(5)
+    ]
+    assert [response.status_code for response in responses] == [401, 401, 401, 401, 429]
+    assert responses[-1].json()['detail']['attempts_remaining'] == 0
+    assert client.post('/api/auth/otp/verify', json={'challenge_id': challenge_id, 'code': '123456'}).status_code == 429
 
 
 def test_link_validation_otp_is_bound_and_expired_link_can_be_renewed(patient_client: Any) -> None:

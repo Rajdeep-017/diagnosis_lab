@@ -1,4 +1,4 @@
-import { useState, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { useEffect, useState, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'quiet' };
 
@@ -60,7 +60,11 @@ export function ErrorState({ title, onRetry }: { title: string; onRetry: () => v
 
 /** Use for brief feedback; render the message in a live region. */
 export function Toast({ message, onClose }: { message: string; onClose: () => void }) {
-  return <div role="status" className="toast"><span>{message}</span><button aria-label="Dismiss notification" onClick={onClose}>×</button></div>;
+  useEffect(() => {
+    const timer = window.setTimeout(onClose, 4_000);
+    return () => window.clearTimeout(timer);
+  }, [message, onClose]);
+  return <div role="status" aria-live="polite" aria-atomic="true" className="toast"><span>{message}</span><button aria-label="Dismiss notification" onClick={onClose}>×</button></div>;
 }
 
 /** Use in staff-only views; smaller type is limited to dense operational tables. */
@@ -72,12 +76,14 @@ export function Table({ headers, rows }: { headers: string[]; rows: ReactNode[][
 
 /** Offer three patient-facing themes using names as well as an Aa preview. */
 export function ThemeSwitcher({ theme, onChange }: { theme: string; onChange: (value: 'clarity' | 'large' | 'night') => void }) {
-  return <div className="theme-switcher" role="group" aria-label="Text size and appearance">
-    <span aria-hidden="true" className="theme-switcher__aa">Aa</span>
-    {(['clarity', 'large', 'night'] as const).map((option) => <button key={option} type="button" aria-pressed={theme === option} onClick={() => onChange(option)}>
-      {option === 'clarity' ? 'Standard' : option === 'large' ? 'Larger text' : 'Night'}
-    </button>)}
-  </div>;
+  return <details className="theme-switcher">
+    <summary role="button" aria-label="Aa appearance and text size"><span aria-hidden="true" className="theme-switcher__aa">Aa</span></summary>
+    <div className="theme-switcher__menu" role="group" aria-label="Text size and appearance">
+      {(['clarity', 'large', 'night'] as const).map((option) => <button key={option} type="button" aria-pressed={theme === option} onClick={() => onChange(option)}>
+        {option === 'clarity' ? 'Standard' : option === 'large' ? 'Larger text' : 'Night'}
+      </button>)}
+    </div>
+  </details>;
 }
 
 export function useToast() {

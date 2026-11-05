@@ -81,11 +81,13 @@ export type PatientReport = {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
+    const method = (init.method ?? 'GET').toUpperCase();
     response = await fetch(`/api${path}`, {
       ...init,
       credentials: 'include',
       headers: {
         ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(method !== 'GET' && method !== 'HEAD' ? { 'X-CSRF-Token': '1' } : {}),
         ...init.headers,
       },
     });

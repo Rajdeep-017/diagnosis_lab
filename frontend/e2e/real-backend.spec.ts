@@ -71,10 +71,18 @@ async function importReport(page: Page, csv: string) {
 }
 
 async function outboxLink(page: Page, orderNo: string) {
-  const row = page.getByRole('row').filter({ hasText: orderNo });
-  const link = row.getByRole('link', { name: 'Open patient link' });
-  await expect(link).toBeVisible();
-  return await link.getAttribute('href') as string;
+  const row = page.locator('#outbox').getByRole('row')
+    .filter({ hasText: orderNo })
+    .filter({ hasText: 'report-link' })
+    .first();
+  await expect(row).toBeVisible();
+  const body = await row.innerText();
+  const link = body.match(/\/r\/[A-Za-z0-9_-]+/)?.[0];
+  expect(link, 'The demo outbox row should contain a report link.').toBeTruthy();
+  expect(body).toContain('report-link');
+  expect(body).toContain('sms');
+  expect(body).toMatch(/\d{3}\*{6}\d{2}/);
+  return link!;
 }
 
 async function verifyPatientOtp(page: Page, link: string, mobile: string) {
@@ -82,13 +90,20 @@ async function verifyPatientOtp(page: Page, link: string, mobile: string) {
   await expect(page).toHaveURL(/\/login\?link_token=/);
   await page.getByLabel('Mobile number').fill(mobile);
   await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'Send verification code' }).click();
+  await page.getByRole('button', { name: 'Send code' }).click();
   await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
-  const demoBanner = page.locator('.demo-otp-banner');
-  await expect(demoBanner).toContainText('Demo code');
-  const code = (await demoBanner.innerText()).match(/\b\d{6}\b/)?.[0];
-  expect(code, 'The code must come from the backend demo outbox banner.').toBeTruthy();
-  await page.getByLabel('Verification code').fill(code!);
+  await expect(page.getByRole('status')).toContainText('Demo: code is in the outbox.');
+  const challengeId = new URL(page.url()).searchParams.get('challenge_id');
+  expect(challengeId).toBeTruthy();
+  const response = await page.request.get(`/api/auth/demo/outbox/${challengeId}`);
+  expect(response.ok()).toBeTruthy();
+  const { code } = await response.json() as { code: string };
+  const staffOutboxResponse = await page.request.get('/api/staff/outbox');
+  expect(staffOutboxResponse.ok()).toBeTruthy();
+  const staffOutbox = await staffOutboxResponse.json() as { messages: { purpose: string; body: string }[] };
+  expect(staffOutbox.messages.some((message) => message.purpose === 'otp' && message.body.includes(code))).toBe(true);
+  expect(await page.locator('body').innerText()).not.toContain(code);
+  await page.getByLabel('Verification code').fill(code);
   await page.getByRole('button', { name: 'Verify code' }).click();
 }
 
@@ -97,8 +112,8 @@ test('CSV ready delivery, family report, feedback, audit log, and expired link w
   await loginAsStaff(page);
   await importReport(page, reportCsv({
     order: orderNo,
-    patient: 'Ananya Integration',
-    familyMember: 'Ravi Integration',
+    patient: 'Demo Integration Patient',
+    familyMember: 'Demo Family Patient',
     parameter: 'Haemoglobin',
     value: '10.2',
     unit: 'g/dL',
@@ -107,14 +122,14 @@ test('CSV ready delivery, family report, feedback, audit log, and expired link w
     english: 'Haemoglobin is below the usual range.',
     telugu: 'హీమోగ్లోబిన్ సాధారణ పరిధి కంటే తక్కువగా ఉంది.',
   }));
-  const readyRow = page.locator('#orders .data-table').first().locator('tbody tr').filter({ hasText: 'Ananya Integration' });
+  const readyRow = page.locator('#orders .data-table').first().locator('tbody tr').filter({ hasText: 'Demo Integration Patient' });
   await expect(readyRow).toContainText('Ready');
   const link = await outboxLink(page, orderNo);
   expect(link).toMatch(/^\/r\/[A-Za-z0-9_-]+$/);
 
   await verifyPatientOtp(page, link, patientMobile);
   await expect(page.getByRole('heading', { name: 'Choose a patient' })).toBeVisible();
-  const patientCard = page.locator('.patient-picker-list .card').filter({ hasText: 'Ananya Integration' });
+  const patientCard = page.locator('.patient-picker-list .card').filter({ hasText: 'Demo Integration Patient' });
   await patientCard.getByRole('button', { name: 'View reports' }).click();
   await page.getByRole('button', { name: 'Open report' }).click();
   await expect(page.getByText('10.2', { exact: true })).toBeVisible();
@@ -130,16 +145,20 @@ test('CSV ready delivery, family report, feedback, audit log, and expired link w
   await loginAsStaff(page);
   await expect(page.locator('#review').getByText('Patient flagged')).toBeVisible();
   await expect(page.getByText('The Telugu wording is unclear.')).toBeVisible();
-  const orderRow = page.locator('#orders .data-table').first().locator('tbody tr').filter({ hasText: orderNo }).filter({ hasText: 'Ananya Integration' }).first();
+  const orderRow = page.locator('#orders .data-table').first().locator('tbody tr').filter({ hasText: orderNo }).filter({ hasText: 'Demo Integration Patient' }).first();
   await orderRow.getByRole('button', { name: `Actions for ${orderNo}` }).click();
-  await page.getByRole('menuitem', { name: 'View access log' }).click();
+  await page.getByRole('menuitem', { name: 'Access log' }).click();
   await expect(page.getByRole('dialog').getByText('report_view', { exact: true }).first()).toBeVisible();
 
   const clockStatus = await page.evaluate(async () => {
     const response = await fetch('/api/test/clock/advance', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'X-E2E-Token': 'isocode-e2e-only-token' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': '1',
+        'X-E2E-Token': 'isocode-e2e-only-token',
+      },
       body: JSON.stringify({ hours: 73 }),
     });
     return response.status;
@@ -171,7 +190,7 @@ test('a different mobile cannot request access to an order link', async ({ page 
   });
   await page.getByLabel('Mobile number').fill('9876543299');
   await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'Send verification code' }).click();
+  await page.getByRole('button', { name: 'Send code' }).click();
   await expect(page.getByRole('alert')).toContainText('Mobile number does not match this report');
   expect(mismatchStatus).toBe(403);
 });
@@ -191,6 +210,10 @@ test('critical reports suppress values and create a staff callback task', async 
     english: 'Critical result.',
     telugu: 'విమర్శనాత్మక ఫలితం.',
   }));
+  const outboxResponse = await page.request.get('/api/staff/outbox');
+  const outbox = await outboxResponse.json() as { messages: { order: string | null; purpose: string }[] };
+  expect(outboxResponse.ok()).toBeTruthy();
+  expect(outbox.messages.some((message) => message.order === orderNo && message.purpose === 'callback-notice')).toBe(true);
   const link = await outboxLink(page, orderNo);
   await verifyPatientOtp(page, link, '9876543298');
   await expect(page).toHaveURL(/\/orders\?patient_id=/);
@@ -201,4 +224,36 @@ test('critical reports suppress values and create a staff callback task', async 
   await loginAsStaff(page);
   const callbackRow = page.locator('#callbacks .data-table tbody tr').filter({ hasText: orderNo }).first();
   await expect(callbackRow).toContainText('Critical result requires patient follow-up: Potassium.');
+});
+
+test('wrong OTP attempts are counted and the challenge locks after five failures', async ({ page }) => {
+  const orderNo = 'E2E-OTP-LOCK-001';
+  await loginAsStaff(page);
+  await importReport(page, reportCsv({
+    order: orderNo,
+    patient: 'Lockout Patient',
+    parameter: 'Haemoglobin',
+    value: '10.2',
+    unit: 'g/dL',
+    range: '12.0-15.5',
+    flag: 'low',
+    english: 'Below the usual range.',
+    telugu: 'సాధారణ పరిధి కంటే తక్కువ.',
+  }));
+  const link = await outboxLink(page, orderNo);
+  await page.goto(link);
+  await page.getByLabel('Mobile number').fill(patientMobile);
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Send code' }).click();
+  await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
+
+  const statuses: number[] = [];
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const verification = page.waitForResponse((response) => response.url().endsWith('/api/auth/otp/verify'));
+    await page.getByLabel('Verification code').fill('000000');
+    await page.getByRole('button', { name: 'Verify code' }).click();
+    statuses.push((await verification).status());
+  }
+  expect(statuses).toEqual([401, 401, 401, 401, 429]);
+  await expect(page.getByRole('alert')).toContainText('Too many incorrect codes');
 });

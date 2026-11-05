@@ -19,17 +19,23 @@ services:
     build:
       context: ./backend
     environment:
+      ENVIRONMENT: development
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/labportal
       FRONTEND_ORIGIN: http://localhost:5173
       DEMO_MODE: ${DEMO_MODE:-true}
       DEMO_STAFF_EMAIL: ${DEMO_STAFF_EMAIL:-staff@example.com}
-      DEMO_STAFF_PASSWORD: ${DEMO_STAFF_PASSWORD:-password123}
+      DEMO_STAFF_PASSWORD: ${DEMO_STAFF_PASSWORD:-}
       DEMO_OPS_EMAIL: ${DEMO_OPS_EMAIL:-ops@example.com}
       DEMO_PATHOLOGIST_EMAIL: ${DEMO_PATHOLOGIST_EMAIL:-pathologist@example.com}
       JWT_SECRET: ${JWT_SECRET:-development-secret-change-before-deploy}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-15000}
     ports:
       - '8000:8000'
+    command: ['sh', '-c', 'python -m alembic upgrade head && python -m app.bootstrap && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload']
     healthcheck:
       test: ['CMD', 'python', '-c', "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/readyz', timeout=2)"]
       interval: 5s
@@ -50,7 +56,7 @@ services:
       VITE_API_PROXY_TARGET: http://backend:8000
       VITE_DEMO_MODE: ${DEMO_MODE:-true}
       VITE_DEMO_STAFF_EMAIL: ${DEMO_STAFF_EMAIL:-staff@example.com}
-      VITE_DEMO_STAFF_PASSWORD: ${DEMO_STAFF_PASSWORD:-password123}
+      VITE_DEMO_STAFF_PASSWORD: ${DEMO_STAFF_PASSWORD:-}
     depends_on:
       backend:
         condition: service_healthy
@@ -76,6 +82,7 @@ services:
       context: ./backend
     profiles: ['e2e']
     environment:
+      ENVIRONMENT: test
       DATABASE_URL: postgresql+psycopg://e2e:e2e-only-password@e2e-db:5432/labportal_e2e
       FRONTEND_ORIGIN: http://127.0.0.1:4174
       DEMO_MODE: 'true'
@@ -85,8 +92,13 @@ services:
       AUTH_COOKIE_SECURE: 'false'
       E2E_TEST_MODE: 'true'
       E2E_TEST_TOKEN: isocode-e2e-only-token
+      DB_POOL_SIZE: '5'
+      DB_MAX_OVERFLOW: '5'
+      DB_POOL_TIMEOUT_SECONDS: '10'
+      DB_STATEMENT_TIMEOUT_MS: '15000'
     ports:
       - '127.0.0.1:8001:8000'
+    command: ['sh', '-c', 'python -m alembic upgrade head && python -m app.bootstrap && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log']
     healthcheck:
       test: ['CMD', 'python', '-c', "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/readyz', timeout=2)"]
       interval: 5s

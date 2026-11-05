@@ -11,12 +11,12 @@
 - Frontend: deploy to Vercel, pointing to the backend origin.
 - Use managed Postgres and enable automatic backups.
 
-## Demo logins
+## Demo accounts
 
-- Patient: `+91 9876543210`
-- Front-desk: `staff@example.com` / `password123`
-- Operations: `ops@example.com` / `password123`
-- Pathologist: `pathologist@example.com` / `password123`
+Local demo accounts and sample orders are created only when `DEMO_MODE=true`.
+Set a private `DEMO_STAFF_PASSWORD` in your local environment before starting
+Compose. Do not reuse demo credentials in production; production rejects demo
+mode and requires secure cookies and a unique JWT secret.
 
 ## Environment variable names
 

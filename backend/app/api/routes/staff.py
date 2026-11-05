@@ -4,14 +4,14 @@ import csv
 import hashlib
 import io
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Annotated
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import get_settings
@@ -49,12 +49,37 @@ class CsvImportRequest(BaseModel):
     csv: str = Field(..., min_length=1, max_length=1_000_000)
 
 
+class ResendRequest(BaseModel):
+    confirmed: bool
+
+
 def _public_user(user: StaffUser) -> dict[str, int | str]:
     return {'id': user.id, 'email': user.email, 'role': user.role}
 
 
+def _mask_recipient(mobile: str) -> str:
+    digits = ''.join(character for character in mobile if character.isdigit())
+    return f'{digits[:3]}******{digits[-2:]}' if len(digits) >= 5 else '—'
+
+
 @router.post('/login')
-def login(payload: StaffLogin, response: Response, db: Database) -> dict[str, dict[str, int | str]]:
+def login(payload: StaffLogin, request: Request, response: Response, db: Database) -> dict[str, dict[str, int | str]]:
+    source_ip = request.client.host if request.client else 'unknown'
+    ip_digest = hashlib.sha256(source_ip.encode('utf-8')).hexdigest()
+    now = utc_now()
+    window_start = now - timedelta(minutes=15)
+    failures = db.scalar(select(func.count(AccessLog.id)).where(
+        AccessLog.action == 'staff_login_failed',
+        AccessLog.ip == ip_digest,
+        AccessLog.created_at >= window_start,
+    )) or 0
+    if failures >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={'code': 'rate_limited', 'message': 'Too many sign-in attempts. Try again later.', 'retry_after': 900},
+            headers={'Retry-After': '900'},
+        )
+
     email = payload.email.strip().lower()
     user = db.scalar(select(StaffUser).where(StaffUser.email == email))
     password_matches = False
@@ -65,6 +90,8 @@ def login(payload: StaffLogin, response: Response, db: Database) -> dict[str, di
             password_matches = False
 
     if not password_matches or user is None:
+        db.add(AccessLog(actor='anonymous', action='staff_login_failed', ip=ip_digest))
+        db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Email or password is incorrect.')
 
     settings = get_settings()
@@ -93,32 +120,158 @@ def logout(response: Response) -> Response:
 
 
 @router.get('/orders')
-def list_orders(_: StaffSession, db: Database) -> dict[str, list[dict[str, object]]]:
-    orders = db.scalars(
-        select(Order).options(joinedload(Order.patient)).order_by(Order.created_at.desc(), Order.id.desc())
-    ).unique().all()
-    order_ids = [order.id for order in orders]
-    last_deliveries = {}
-    if order_ids:
-        last_deliveries = dict(db.execute(
-            select(Notification.order_id, func.max(Notification.created_at))
-            .where(
-                Notification.order_id.in_(order_ids),
-                Notification.status == NotificationStatus.delivered,
-            )
-            .group_by(Notification.order_id)
-        ).all())
+def list_orders(
+    _: StaffSession,
+    db: Database,
+    search: str = Query(default='', max_length=100),
+    order_status: str | None = Query(default=None, alias='status', max_length=32),
+    delivery_state: str | None = Query(default=None, max_length=32),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> dict[str, object]:
+    latest_status = (
+        select(Notification.status)
+        .where(Notification.order_id == Order.id, Notification.purpose == 'report-link')
+        .order_by(Notification.created_at.desc(), Notification.id.desc())
+        .limit(1)
+        .correlate(Order)
+        .scalar_subquery()
+    )
+    latest_time = (
+        select(Notification.created_at)
+        .where(Notification.order_id == Order.id, Notification.purpose == 'report-link')
+        .order_by(Notification.created_at.desc(), Notification.id.desc())
+        .limit(1)
+        .correlate(Order)
+        .scalar_subquery()
+    )
+    latest_link_expiry = (
+        select(ReportLink.expires_at)
+        .where(ReportLink.order_id == Order.id, ReportLink.revoked_at.is_(None))
+        .order_by(ReportLink.created_at.desc(), ReportLink.id.desc())
+        .limit(1)
+        .correlate(Order)
+        .scalar_subquery()
+    )
+    was_opened = exists(
+        select(AccessLog.id).where(AccessLog.order_id == Order.id, AccessLog.action == 'report_view')
+    )
+    now = utc_now()
+    delivery_expression = case(
+        (was_opened, 'link_opened'),
+        (latest_link_expiry.is_not(None) & (latest_link_expiry < now), 'expired'),
+        (latest_status.is_(None), 'not_sent'),
+        else_=latest_status,
+    )
+
+    statement = select(Order, Patient, latest_status, latest_time, latest_link_expiry, delivery_expression).join(
+        Patient, Patient.id == Order.patient_id
+    )
+    filters = []
+    if order_status and order_status != 'all':
+        filters.append(Order.status == order_status)
+    if delivery_state and delivery_state != 'all':
+        filters.append(delivery_expression == delivery_state)
+    if search.strip():
+        term = search.strip().lower()
+        digits = ''.join(character for character in term if character.isdigit())
+        clauses = [
+            func.lower(Order.order_no).contains(term),
+            func.lower(Patient.name).contains(term),
+        ]
+        if len(digits) >= 4:
+            clauses.append(Patient.mobile.contains(digits[-10:]))
+        filters.append(or_(*clauses))
+    if filters:
+        statement = statement.where(*filters)
+
+    total = db.scalar(select(func.count()).select_from(statement.order_by(None).subquery())) or 0
+    rows = db.execute(
+        statement.order_by(Order.created_at.desc(), Order.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
     return {
         'orders': [
             {
                 'id': order.id,
                 'order': order.order_no,
-                'patient': order.patient.name,
+                'patient': patient.name,
+                'mobile': _mask_staff_mobile(patient.mobile),
                 'status': order.status,
-                'last_delivery': last_deliveries[order.id].isoformat() if last_deliveries.get(order.id) else None,
+                'doctor': order.doctor,
+                'signed_at': order.signed_off_at.isoformat() if order.signed_off_at else None,
+                'delivery_state': state,
+                'delivery_at': delivery_at.isoformat() if delivery_at else None,
+                'link_expires_at': expires_at.isoformat() if expires_at else None,
             }
-            for order in orders
-        ]
+            for order, patient, _, delivery_at, expires_at, state in rows
+        ],
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'pages': (total + page_size - 1) // page_size,
+        },
+    }
+
+
+def _mask_staff_mobile(value: str) -> str:
+    digits = ''.join(character for character in value if character.isdigit())[-10:]
+    return f'{digits[:2]}••••{digits[-4:]}' if len(digits) == 10 else '—'
+
+
+@router.post('/orders/{order_id}/reveal-mobile')
+def reveal_order_mobile(order_id: int, user: StaffSession, db: Database) -> dict[str, str]:
+    if user.role not in {'front_desk', 'ops'}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='This staff role cannot reveal mobile numbers.')
+    order = db.scalar(select(Order).options(joinedload(Order.patient)).where(Order.id == order_id))
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
+    db.add(AccessLog(actor=f'staff:{user.id}', order_id=order.id, action='mobile_reveal'))
+    db.commit()
+    return {'mobile': order.patient.mobile}
+
+
+@router.get('/orders/{order_id}')
+def order_detail(order_id: int, _: StaffSession, db: Database) -> dict[str, object]:
+    order = db.scalar(select(Order).options(joinedload(Order.patient)).where(Order.id == order_id))
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
+    notifications = db.scalars(
+        select(Notification)
+        .where(Notification.order_id == order.id, Notification.purpose == 'report-link')
+        .order_by(Notification.created_at, Notification.id)
+    ).all()
+    latest_link = db.scalar(
+        select(ReportLink)
+        .where(ReportLink.order_id == order.id, ReportLink.revoked_at.is_(None))
+        .order_by(ReportLink.created_at.desc(), ReportLink.id.desc())
+        .limit(1)
+    )
+    callback = db.scalar(
+        select(CallbackTask).where(CallbackTask.order_id == order.id, CallbackTask.status == 'open')
+        .order_by(CallbackTask.created_at.desc(), CallbackTask.id.desc()).limit(1)
+    )
+    return {
+        'id': order.id,
+        'order': order.order_no,
+        'patient': order.patient.name,
+        'status': order.status,
+        'doctor': order.doctor,
+        'signed_at': order.signed_off_at.isoformat() if order.signed_off_at else None,
+        'link_expires_at': latest_link.expires_at.isoformat() if latest_link else None,
+        'delivery_timeline': [
+            {
+                'status': notification.status.value if isinstance(notification.status, NotificationStatus) else notification.status,
+                'created_at': notification.created_at.isoformat(),
+            }
+            for notification in notifications
+        ],
+        'callback_task': (
+            {'id': callback.id, 'status': callback.status, 'notes': callback.notes}
+            if callback else None
+        ),
     }
 
 
@@ -225,6 +378,14 @@ def import_csv(payload: CsvImportRequest, user: StaffSession, db: Database) -> d
                 status='open',
                 notes=f'Critical result requires patient follow-up: {values["parameter"]}.',
             ))
+            db.add(Notification(
+                order_id=order.id,
+                channel='internal',
+                recipient='Staff',
+                purpose='callback-notice',
+                payload=f'Callback task created for critical result {values["parameter"]} on {order.order_no}.',
+                status=NotificationStatus.queued,
+            ))
 
     for order_id in transitioned_orders:
         token = secrets.token_urlsafe(32)
@@ -237,7 +398,13 @@ def import_csv(payload: CsvImportRequest, user: StaffSession, db: Database) -> d
         db.add(Notification(
             order_id=order_id,
             channel='sms',
-            payload=f'Report {order.order_no} is ready. Open your report: /r/{token}',
+            recipient=_mask_recipient(order.patient.mobile),
+            purpose='report-link',
+            payload=(
+                f'Report {order.order_no} is ready. Open your report: /r/{token}'
+                if get_settings().demo_mode
+                else f'Report {order.order_no} is ready.'
+            ),
             status=NotificationStatus.queued,
         ))
     db.commit()
@@ -250,21 +417,28 @@ def import_csv(payload: CsvImportRequest, user: StaffSession, db: Database) -> d
 
 
 @router.get('/outbox')
-def list_outbox(_: StaffSession, db: Database) -> dict[str, list[dict[str, object]]]:
+def list_outbox(user: StaffSession, db: Database) -> dict[str, list[dict[str, object]]]:
+    if not get_settings().demo_mode:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Not found.')
+    if user.role not in {'front_desk', 'ops'}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='This staff role cannot view the outbox.')
     rows = db.execute(
         select(Notification, Order.order_no)
         .outerjoin(Order, Order.id == Notification.order_id)
         .order_by(Notification.created_at.desc(), Notification.id.desc())
+        .limit(50)
     ).all()
     return {'messages': [
         {
             'id': notification.id,
             'order_id': notification.order_id,
             'order': order_no,
-            'to': notification.channel,
+            'time': notification.created_at.isoformat(),
+            'channel': notification.channel,
+            'recipient': notification.recipient or '—',
+            'purpose': notification.purpose,
             'body': notification.payload,
             'status': notification.status.value if isinstance(notification.status, NotificationStatus) else notification.status,
-            'created_at': notification.created_at.isoformat(),
         }
         for notification, order_no in rows
     ]}
@@ -354,15 +528,47 @@ def list_summary_review_queue(_: StaffSession, db: Database) -> dict[str, list[d
 
 
 @router.post('/orders/{order_id}/resend', status_code=status.HTTP_202_ACCEPTED)
-def resend_order(order_id: int, user: StaffSession, db: Database) -> dict[str, str]:
-    order = db.get(Order, order_id)
+def resend_order(order_id: int, payload: ResendRequest, user: StaffSession, db: Database) -> dict[str, str]:
+    if not payload.confirmed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Confirm before resending a report link.')
+    if user.role not in {'front_desk', 'ops'}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='This staff role cannot resend report links.')
+    order = db.scalar(select(Order).options(joinedload(Order.patient)).where(Order.id == order_id))
     if order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Order not found.')
+    now = utc_now()
+    actor = f'staff:{user.id}'
+    recent_resends = db.scalar(select(func.count(AccessLog.id)).where(
+        AccessLog.order_id == order.id,
+        AccessLog.actor == actor,
+        AccessLog.action == 'report_link_resend',
+        AccessLog.created_at >= now - timedelta(hours=1),
+    )) or 0
+    if recent_resends >= 3:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={'code': 'rate_limited', 'message': 'This order has reached its resend limit.', 'retry_after': 3600},
+            headers={'Retry-After': '3600'},
+        )
+    token = secrets.token_urlsafe(32)
+    expires_at = now + timedelta(hours=get_settings().link_ttl_hours)
+    db.add(ReportLink(
+        order_id=order.id,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        expires_at=expires_at,
+    ))
     db.add(Notification(
         order_id=order.id,
         channel='sms',
-        payload=f'Resend requested for {order.order_no} by {user.email} at {datetime.now(timezone.utc).isoformat()}',
+        recipient=_mask_recipient(order.patient.mobile),
+        purpose='report-link',
+        payload=(
+            f'Report {order.order_no} is ready. Open your report: /r/{token}'
+            if get_settings().demo_mode
+            else f'Report {order.order_no} delivery has been requested.'
+        ),
         status=NotificationStatus.queued,
     ))
+    db.add(AccessLog(actor=actor, order_id=order.id, action='report_link_resend'))
     db.commit()
-    return {'status': 'queued', 'message': 'Report delivery has been queued.'}
+    return {'status': 'queued', 'message': 'Report delivery has been queued.', 'expires_at': expires_at.isoformat()}

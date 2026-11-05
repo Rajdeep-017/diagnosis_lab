@@ -1,7 +1,7 @@
 {
   "ci": {
     "collect": {
-      "url": ["http://127.0.0.1:4173/", "http://127.0.0.1:4173/report"],
+      "url": ["http://127.0.0.1:4173/", "http://127.0.0.1:4173/privacy"],
       "startServerCommand": "npm run preview -- --host 127.0.0.1 --port 4173",
       "startServerReadyPattern": "Local:",
       "startServerReadyTimeout": 30000,

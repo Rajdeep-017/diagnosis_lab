@@ -18,7 +18,8 @@ function displayDate(value: string | null) {
 
 function convertReport(data: PatientReport): ReportData {
   const results: Result[] = data.results.map((item) => {
-    const bounds = item.reference_range?.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+    const range = item.reference_range?.match(/^\s*(-?\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(-?\d+(?:\.\d+)?)\s*$/i);
+    const bounds = range ? [Number(range[1]), Number(range[2])] : [];
     const low = bounds[0] ?? 0;
     const high = bounds[1] ?? low + 1;
     const value = item.value === null ? 0 : Number(item.value);

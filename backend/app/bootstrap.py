@@ -1,21 +1,38 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from argon2 import PasswordHasher
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models.domain import Order, Patient, Result, StaffUser, Summary
+from app.models.domain import (
+    AccessLog,
+    CallbackTask,
+    Notification,
+    NotificationStatus,
+    Order,
+    Patient,
+    ReportLink,
+    Result,
+    StaffUser,
+    Summary,
+)
 
 
 SAMPLE_ORDERS = (
-    ('ORD-1001', 'Ananya Rao', '9876543210', 'Haemoglobin', '10.2', 'g/dL', '12.0-15.5', 'low'),
-    ('ORD-1002', 'Vivek Nair', '9876543211', 'LDL', '142', 'mg/dL', '0-100', 'high'),
-    ('ORD-1003', 'Ramesh Yadav', '9876543212', 'Potassium', '6.8', 'mEq/L', '3.5-5.1', 'critical'),
-    ('ORD-1004', 'Sowmya Kumar', '9876543213', 'Glucose', '88', 'mg/dL', '70-140', 'normal'),
-    ('ORD-1005', 'Meera Singh', '9876543214', 'Creatinine', '1.1', 'mg/dL', '0.6-1.2', 'normal'),
+    ('DEMO-1001', 'Demo Family Member A', '9000001001', 'Haemoglobin', '10.2', 'g/dL', '12.0-15.5', 'low', 'processing', None),
+    ('DEMO-1002', 'Demo Family Member B', '9000001001', 'Glucose', '92', 'mg/dL', '70-140', 'normal', 'ready', None),
+    ('DEMO-1003', 'Demo Family Member C', '9000001001', 'Creatinine', '1.4', 'mg/dL', '0.6-1.2', 'high', 'ready', 'queued'),
+    ('DEMO-1004', 'Demo Patient D', '9000001002', 'LDL', '142', 'mg/dL', '0-100', 'high', 'ready', 'sent'),
+    ('DEMO-1005', 'Demo Patient E', '9000001003', 'Glucose', '88', 'mg/dL', '70-140', 'normal', 'ready', 'delivered'),
+    ('DEMO-1006', 'Demo Patient F', '9000001004', 'Vitamin D', '12', 'ng/mL', '30-100', 'low', 'ready', 'failed'),
+    ('DEMO-1007', 'Demo Patient G', '9000001005', 'Cholesterol', '188', 'mg/dL', '0-200', 'normal', 'ready', 'link_opened'),
+    ('DEMO-1008', 'Demo Patient H', '9000001006', 'TSH', '3.1', 'mIU/L', '0.4-4.0', 'normal', 'ready', 'expired'),
+    ('DEMO-1009', 'Demo Patient I', '9000001007', 'Potassium', '7.1', 'mEq/L', '3.5-5.1', 'critical', 'ready', None),
 )
 
 
@@ -38,11 +55,17 @@ def bootstrap_database() -> None:
                         role=role,
                     ))
 
-        if db.scalar(select(Order.id).limit(1)) is None:
+        if settings.demo_mode and db.scalar(select(Order.id).limit(1)) is None:
             now = datetime.now(timezone.utc)
-            for order_no, patient_name, mobile, parameter, value, unit, reference_range, flag in SAMPLE_ORDERS:
+            for order_no, patient_name, mobile, parameter, value, unit, reference_range, flag, order_status, delivery in SAMPLE_ORDERS:
                 patient = Patient(name=patient_name, mobile=mobile)
-                order = Order(order_no=order_no, patient=patient, status='ready', signed_off_at=now)
+                order = Order(
+                    order_no=order_no,
+                    patient=patient,
+                    status=order_status,
+                    doctor='Demo Clinician' if order_status == 'ready' else None,
+                    signed_off_at=now if order_status == 'ready' else None,
+                )
                 order.results.append(Result(
                     parameter=parameter,
                     value=value,
@@ -76,6 +99,51 @@ def bootstrap_database() -> None:
                             text=text,
                             source='fallback',
                         ))
+
+                if delivery:
+                    token = secrets.token_urlsafe(32)
+                    expires_at = now - timedelta(hours=1) if delivery == 'expired' else now + timedelta(hours=72)
+                    db.add(ReportLink(
+                        order_id=order.id,
+                        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                        expires_at=expires_at,
+                    ))
+                    delivery_status = {
+                        'queued': NotificationStatus.queued,
+                        'sent': NotificationStatus.sent,
+                        'delivered': NotificationStatus.delivered,
+                        'failed': NotificationStatus.failed,
+                        'link_opened': NotificationStatus.delivered,
+                        'expired': NotificationStatus.sent,
+                    }[delivery]
+                    db.add(Notification(
+                        order_id=order.id,
+                        channel='sms',
+                        recipient=f'{mobile[:2]}••••{mobile[-4:]}',
+                        purpose='report-link',
+                        payload=(
+                            f'Demo report {order_no}: /r/{token}'
+                            if settings.demo_mode else f'Report {order_no} delivery recorded.'
+                        ),
+                        status=delivery_status,
+                    ))
+                    if delivery == 'link_opened':
+                        db.add(AccessLog(actor='patient', order_id=order.id, action='report_view'))
+
+                if flag == 'critical':
+                    db.add(CallbackTask(
+                        order_id=order.id,
+                        status='open',
+                        notes=f'Critical result requires follow-up: {parameter}.',
+                    ))
+                    db.add(Notification(
+                        order_id=order.id,
+                        channel='internal',
+                        recipient='Staff',
+                        purpose='callback-notice',
+                        payload=f'Callback task created for critical result on {order_no}.',
+                        status=NotificationStatus.queued,
+                    ))
 
         db.commit()
 

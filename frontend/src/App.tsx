@@ -10,6 +10,7 @@ const PatientLoginPage = lazy(() => import('./pages/PatientAccess').then((module
 const PatientVerifyPage = lazy(() => import('./pages/PatientAccess').then((module) => ({ default: module.PatientVerifyPage })));
 const PatientPickerPage = lazy(() => import('./pages/PatientAccess').then((module) => ({ default: module.PatientPickerPage })));
 const PatientOrdersPage = lazy(() => import('./pages/PatientAccess').then((module) => ({ default: module.PatientOrdersPage })));
+const PrivacyNoticePage = lazy(() => import('./pages/PatientAccess').then((module) => ({ default: module.PrivacyNoticePage })));
 
 type SampleCopy = { title: string; body: string; name: string };
 const loadSampleCopy: Record<Language, () => Promise<SampleCopy>> = {
@@ -35,7 +36,7 @@ function LanguageSample({ language }: { language: Language }) {
     return () => { active = false; };
   }, [language]);
   return <div lang={language === 'te' ? 'te-IN' : language === 'hi' ? 'hi-IN' : 'en-IN'} className="language-sample">
-    <h3>{loadError ? 'Preview language unavailable' : copy.title}</h3><p>{loadError ? 'Try refreshing this page to load the selected language.' : copy.body}</p><label>{copy.name}<input className="control" value="Anita Rao" readOnly /></label>
+    <h3>{loadError ? 'Preview language unavailable' : copy.title}</h3><p>{loadError ? 'Try refreshing this page to load the selected language.' : copy.body}</p><label>{copy.name}<input className="control" value="Styleguide Sample Patient" readOnly /></label>
   </div>;
 }
 
@@ -65,7 +66,7 @@ function Styleguide() {
         <LanguageSample language={language} />
         <div className="component-row"><Button variant="primary">Primary action</Button><Button>Secondary</Button><StatusChip status="low">Below range</StatusChip></div>
         <Card><strong>Result card</strong><p>Haemoglobin · 10.2 g/dL</p><Skeleton className="skeleton--demo" /></Card>
-        <div className="styleguide-fields"><Input label="Patient name" value="Anita Rao" readOnly /><OtpInput label="Verification code" placeholder="6-digit code" /><Select label="Choose a test"><option>Complete blood count</option></Select></div>
+        <div className="styleguide-fields"><Input label="Patient name" value="Styleguide Sample Patient" readOnly /><OtpInput label="Verification code" placeholder="6-digit code" /><Select label="Choose a test"><option>Complete blood count</option></Select></div>
         <Table headers={['Test', 'Status']} rows={[[ 'Haemoglobin', <StatusChip status="low">Below range</StatusChip> ]]} />
         <ToastPreview />
         <div className="component-row"><Button onClick={() => showToast('Saved')}>Show toast</Button><Button onClick={() => setNotice(!notice)}>Toggle empty state</Button></div>
@@ -75,16 +76,6 @@ function Styleguide() {
     </div>
     {toast}
     <p><a href="/styleguide/report">Preview report fixtures and layouts</a></p>
-  </main>;
-}
-
-function Landing() {
-  const { theme, setTheme } = useTheme();
-  return <main className="patient-shell">
-    <header className="report-header"><a className="brand" href="/">Company A <span>Reports</span></a><ThemeSwitcher theme={theme} onChange={(value) => setTheme(value)} /></header>
-    <section className="report-intro"><p className="eyebrow">Secure patient access</p><h1>Report delivery portal</h1><p className="lead">View your lab report and understand your results in the language you prefer.</p></section>
-    <Card><h2>View your reports</h2><p>Verify your mobile number to see reports linked to your account.</p><Button variant="primary" onClick={() => { window.location.href = '/login'; }}>Patient sign in</Button></Card>
-    <Card><h2>Staff access</h2><p>For lab staff managing report delivery.</p><Button onClick={() => { window.location.href = '/staff'; }}>Staff login</Button></Card>
   </main>;
 }
 
@@ -104,14 +95,15 @@ function RouteView() {
   if (path === '/styleguide') return <Styleguide />;
   if (path === '/styleguide/report') return <LazyPage><ReportStyleguide /></LazyPage>;
   if (path === '/staff' || path === '/staff/login') return <LazyPage><StaffConsole /></LazyPage>;
+  if (path === '/' || path === '/login') return <LazyPage><PatientLoginPage /></LazyPage>;
+  if (path === '/privacy') return <LazyPage><PrivacyNoticePage /></LazyPage>;
   if (reportLink) return <LazyPage><ReportLinkPage token={decodeURIComponent(reportLink[1])} /></LazyPage>;
-  if (path === '/login') return <LazyPage><PatientLoginPage /></LazyPage>;
   if (path === '/verify') return <LazyPage><PatientVerifyPage /></LazyPage>;
   if (path === '/patients') return <LazyPage><PatientPickerPage /></LazyPage>;
   if (path === '/orders') return <LazyPage><PatientOrdersPage /></LazyPage>;
   if (reportMatch) return <LazyPage><ReportPage orderId={Number(reportMatch[1])} /></LazyPage>;
   if (path === '/report') return <Redirect to="/login" />;
-  return <Landing />;
+  return <LazyPage><PatientLoginPage /></LazyPage>;
 }
 
 export default function App() {

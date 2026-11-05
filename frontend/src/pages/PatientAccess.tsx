@@ -1,8 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, EmptyState, ErrorState, Input, Skeleton, StatusChip } from '../components/UI';
+import { Button, Card, EmptyState, ErrorState, Input, Skeleton, StatusChip, ThemeSwitcher } from '../components/UI';
 import {
-  getDemoOtp,
   getPatientSession,
   getPatientReport,
   listPatientOrders,
@@ -36,7 +35,7 @@ function useRetryCountdown(seconds: number) {
 }
 
 function PatientHeader() {
-  return <header className="report-header"><a className="brand" href="/">Company A <span>Reports</span></a><a href="/login">Sign in</a></header>;
+  return <header className="report-header"><a className="brand" href="/">Company A <span>Reports</span></a></header>;
 }
 
 export function ReportLinkPage({ token }: { token: string }) {
@@ -60,6 +59,7 @@ export function ReportLinkPage({ token }: { token: string }) {
 
 export function PatientLoginPage() {
   const linkToken = new URLSearchParams(window.location.search).get('link_token') ?? undefined;
+  const { language, setLanguage, theme, setTheme } = useTheme();
   const [mobile, setMobile] = useState('');
   const [consent, setConsent] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -74,6 +74,41 @@ export function PatientLoginPage() {
     onError: (error) => setRetry(retrySeconds(error)),
   });
   const retryRemaining = useRetryCountdown(retry);
+  const copy = {
+    en: {
+      eyebrow: 'Secure patient access',
+      title: 'View your lab reports',
+      description: 'Enter your mobile number. We will verify it before showing any patient or report information.',
+      mobile: 'Mobile number',
+      consent: <>I agree to receive a one-time verification code. Read our <a href="/privacy">privacy notice</a>.</>,
+      send: 'Send code',
+      sending: 'Sending code…',
+      languages: 'Language',
+      footer: 'Staff login',
+    },
+    te: {
+      eyebrow: 'సురక్షిత రోగి ప్రవేశం',
+      title: 'మీ ల్యాబ్ నివేదికలను చూడండి',
+      description: 'మీ మొబైల్ నంబర్ నమోదు చేయండి. రోగి లేదా నివేదిక వివరాలను చూపించే ముందు దాన్ని ధృవీకరిస్తాము.',
+      mobile: 'మొబైల్ నంబర్',
+      consent: <>ఒకసారి మాత్రమే ఉపయోగించే ధృవీకరణ కోడ్‌ను స్వీకరించడానికి అంగీకరిస్తున్నాను. మా <a href="/privacy">గోప్యతా ప్రకటన</a> చదవండి.</>,
+      send: 'కోడ్ పంపండి',
+      sending: 'కోడ్ పంపుతోంది…',
+      languages: 'భాష',
+      footer: 'సిబ్బంది లాగిన్',
+    },
+    hi: {
+      eyebrow: 'सुरक्षित रोगी प्रवेश',
+      title: 'अपनी लैब रिपोर्ट देखें',
+      description: 'अपना मोबाइल नंबर दर्ज करें। रोगी या रिपोर्ट की जानकारी दिखाने से पहले हम इसकी पुष्टि करेंगे।',
+      mobile: 'मोबाइल नंबर',
+      consent: <>मैं एक बार इस्तेमाल होने वाला सत्यापन कोड पाने के लिए सहमत हूँ। हमारी <a href="/privacy">गोपनीयता सूचना</a> पढ़ें।</>,
+      send: 'कोड भेजें',
+      sending: 'कोड भेजा जा रहा है…',
+      languages: 'भाषा',
+      footer: 'स्टाफ लॉगिन',
+    },
+  }[language];
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -82,18 +117,35 @@ export function PatientLoginPage() {
 
   return <main className="patient-shell">
     <PatientHeader />
+    <div className="patient-preferences">
+      <div className="language-control" role="group" aria-label={copy.languages}>
+        {(['en', 'te', 'hi'] as const).map((value) => <button key={value} type="button" aria-pressed={language === value} onClick={() => setLanguage(value)}>{value.toUpperCase()}</button>)}
+      </div>
+      <ThemeSwitcher theme={theme} onChange={(value) => setTheme(value)} />
+    </div>
     <Card className="patient-auth-card">
-      <p className="eyebrow">Secure patient access</p>
-      <h1>Sign in with your mobile</h1>
-      <p>We will send a one-time code to verify your access to lab reports.</p>
+      <p className="eyebrow">{copy.eyebrow}</p>
+      <h1>{copy.title}</h1>
+      <p>{copy.description}</p>
       <form className="patient-auth-form" onSubmit={submit}>
-        <Input label="Mobile number" name="mobile" type="tel" inputMode="tel" autoComplete="tel" required value={mobile} onChange={(event) => setMobile(event.target.value)} />
-        <label className="consent-control"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} required /><span>I agree to receive a one-time verification code for secure report access.</span></label>
+        <Input label={copy.mobile} name="mobile" type="tel" inputMode="tel" autoComplete="tel" required value={mobile} onChange={(event) => setMobile(event.target.value)} />
+        <label className="consent-control"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} required /><span>{copy.consent}</span></label>
         {request.error && <p className="field__error" role="alert">{request.error.message}{retryRemaining > 0 ? ` Try again in ${retryRemaining} seconds.` : ''}</p>}
-        <Button type="submit" variant="primary" disabled={request.isPending || retryRemaining > 0}>{request.isPending ? 'Sending code…' : retryRemaining > 0 ? `Try again in ${retryRemaining}s` : 'Send verification code'}</Button>
+        <Button type="submit" variant="primary" disabled={request.isPending || retryRemaining > 0}>{request.isPending ? copy.sending : retryRemaining > 0 ? `Try again in ${retryRemaining}s` : copy.send}</Button>
       </form>
     </Card>
+    <footer className="patient-footer"><a href="/staff">{copy.footer}</a></footer>
   </main>;
+}
+
+export function PrivacyNoticePage() {
+  const { language } = useTheme();
+  const copy = {
+    en: ['Privacy notice', 'We use your mobile number and consent to verify access and link only the patient records associated with that number. Reports are shown only after verification. Access to report details and PDF downloads is recorded for security. Contact the lab to request help with your information or withdraw consent.'],
+    te: ['గోప్యతా ప్రకటన', 'ప్రవేశాన్ని ధృవీకరించడానికి మరియు ఈ నంబర్‌కు సంబంధించిన రోగి రికార్డులను మాత్రమే అనుసంధానించడానికి మీ మొబైల్ నంబర్ మరియు సమ్మతిని ఉపయోగిస్తాము. ధృవీకరణ తర్వాత మాత్రమే నివేదికలు చూపబడతాయి. భద్రత కోసం నివేదిక వీక్షణలు మరియు PDF డౌన్‌లోడ్‌లు నమోదు చేయబడతాయి. మీ సమాచారం లేదా సమ్మతి ఉపసంహరణకు సహాయం కోసం ల్యాబ్‌ను సంప్రదించండి.'],
+    hi: ['गोपनीयता सूचना', 'हम आपके मोबाइल नंबर और सहमति का उपयोग प्रवेश सत्यापित करने और केवल उस नंबर से जुड़े रोगी रिकॉर्ड जोड़ने के लिए करते हैं। रिपोर्ट सत्यापन के बाद ही दिखाई जाती हैं। सुरक्षा के लिए रिपोर्ट देखने और PDF डाउनलोड करने का रिकॉर्ड रखा जाता है। अपनी जानकारी या सहमति वापस लेने में सहायता के लिए लैब से संपर्क करें।'],
+  }[language];
+  return <main className="patient-shell"><PatientHeader /><Card><h1>{copy[0]}</h1><p>{copy[1]}</p><a href="/">Back to secure sign in</a></Card></main>;
 }
 
 export function PatientVerifyPage() {
@@ -123,13 +175,6 @@ export function PatientVerifyPage() {
   });
   const [renewedLink, setRenewedLink] = useState('');
   const retryRemaining = useRetryCountdown(retry);
-  const demo = useQuery({
-    queryKey: ['patient', 'demo-otp', challengeId],
-    queryFn: () => getDemoOtp(challengeId),
-    enabled: Boolean(challengeId) && demoMode,
-    retry: false,
-  });
-
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     verified.mutate();
@@ -144,8 +189,7 @@ export function PatientVerifyPage() {
       <p className="eyebrow">One-time verification</p>
       <h1>Enter your code</h1>
       <p>Enter the six-digit code sent to your mobile number.</p>
-      {demo.data && <div className="demo-otp-banner" role="status"><strong>Demo code</strong><span>For review only: {demo.data.code}</span></div>}
-      {demo.isError && <p role="alert">Demo code could not be loaded. Check the backend demo outbox and try again.</p>}
+      {demoMode && <p className="demo-otp-hint" role="status">Demo: code is in the outbox.</p>}
       <form className="patient-auth-form" onSubmit={submit}>
         <Input label="Verification code" name="otp" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} />
         {verified.error && <p className="field__error" role="alert">{verified.error.message}{attemptsRemaining !== null ? ` ${attemptsRemaining} attempts remaining.` : ''}{retryRemaining > 0 ? ` Try again in ${retryRemaining} seconds.` : ''}</p>}

@@ -1,5 +1,18 @@
 import { expect, test } from '@playwright/test';
 
+test('patient home requires mobile consent before displaying any patient information', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'View your lab reports' })).toBeVisible();
+  await expect(page.getByLabel('Mobile number')).toBeVisible();
+  await expect(page.getByRole('checkbox')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'privacy notice' })).toHaveAttribute('href', '/privacy');
+  await expect(page.getByRole('button', { name: 'Send code' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Staff login' })).toHaveAttribute('href', '/staff');
+  await expect(page.getByText(/DEMO-100\d|Visual Test Patient|lab report card/i)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Aa appearance/ })).toBeVisible();
+  for (const language of ['EN', 'TE', 'HI']) await expect(page.getByRole('button', { name: language, exact: true })).toBeVisible();
+});
+
 test('report link verifies through demo OTP and opens the database-backed report', async ({ page }) => {
   let submittedLinkToken = '';
   await page.route('**/api/auth/links/valid-token', (route) => route.fulfill({
@@ -42,7 +55,7 @@ test('report link verifies through demo OTP and opens the database-backed report
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
-      order: { id: 1, order_no: 'ORD-1001', patient: 'Ananya Rao', status: 'ready', signed_at: '2026-11-05T00:00:00Z' },
+      order: { id: 1, order_no: 'DEMO-1002', patient: 'Demo Family Member B', status: 'ready', signed_at: '2026-11-05T00:00:00Z' },
       language: 'en',
       pdf_url: '/api/patient/orders/1/pdf',
       results: [{ id: 1, name: 'Haemoglobin', value: '10.2', unit: 'g/dL', reference_range: '12.0-15.5', flag: 'low', summary_id: 1, summary: 'Below the usual range.', flagged: false }],
@@ -51,7 +64,7 @@ test('report link verifies through demo OTP and opens the database-backed report
   await page.route('**/api/patient/me', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ account: { id: 1 }, patients: [{ id: 1, name: 'Ananya Rao' }] }),
+    body: JSON.stringify({ account: { id: 1 }, patients: [{ id: 1, name: 'Demo Family Member B' }] }),
   }));
   await page.route('**/api/patient/patients/1/orders', (route) => route.fulfill({
     status: 200,
@@ -82,10 +95,15 @@ test('report link verifies through demo OTP and opens the database-backed report
   await expect(page).toHaveURL(/\/login\?link_token=valid-token$/);
   await page.getByLabel('Mobile number').fill('9876543210');
   await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'Send verification code' }).click();
+  await page.getByRole('button', { name: 'Send code' }).click();
   await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
   expect(submittedLinkToken).toBe('valid-token');
-  await expect(page.getByRole('status')).toContainText('Demo code');
+  await expect(page.getByRole('status')).toContainText('Demo: code is in the outbox.');
+  const demoOtp = await page.evaluate(async () => {
+    const response = await fetch('/api/auth/demo/outbox/a-valid-challenge-reference-12345');
+    return response.json() as Promise<{ code: string }>;
+  });
+  expect(demoOtp.code).toBe('123456');
   await page.getByLabel('Verification code').fill('000000');
   await page.getByRole('button', { name: 'Verify code' }).click();
   await expect(page.getByRole('alert')).toContainText('4 attempts remaining');
@@ -93,7 +111,7 @@ test('report link verifies through demo OTP and opens the database-backed report
   await page.getByRole('button', { name: 'Verify code' }).click();
   await expect(page).toHaveURL(/\/orders\?patient_id=1$/);
   await page.getByRole('button', { name: 'Open report' }).click();
-  await expect(page.getByRole('heading', { name: 'Ananya Rao' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Demo Family Member B' })).toBeVisible();
   await expect(page.getByText('Below the usual range.')).toBeVisible();
   await page.getByRole('button', { name: 'Report a problem with this summary' }).click();
   await page.getByLabel('What seems wrong? (optional)').fill('This explanation is unclear.');
@@ -132,6 +150,6 @@ test('expired report link offers OTP renewal without disclosing report data', as
   await page.getByRole('button', { name: 'Get a new link with OTP' }).click();
   await page.getByLabel('Mobile number').fill('9876543210');
   await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'Send verification code' }).click();
+  await page.getByRole('button', { name: 'Send code' }).click();
   await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
 });
